@@ -119,6 +119,10 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #define DEFAULT_BEACON_POWER        14
 #define DEFAULT_BEACON_INFODESC     0
 
+#define GPIO_LED_GREEN	3
+#define GPIO_LED_BLUE	4
+#define GPIO_LED_RED	5
+
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE TYPES -------------------------------------------------------- */
 
@@ -293,6 +297,9 @@ static void gps_process_coords(void);
 
 static int get_tx_gain_lut_index(uint8_t rf_chain, int8_t rf_power, uint8_t * lut_index);
 
+void lgw_pin_mode_set(uint8_t pin, bool output);
+void lgw_pin_out_write(uint8_t pin, bool high);
+
 /* threads */
 void thread_up(void);
 void thread_down(void);
@@ -303,6 +310,77 @@ void thread_spectral_scan(void);
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DEFINITION ----------------------------------------- */
+
+void lgw_pin_mode_set(uint8_t pin, bool output)
+{
+    uint16_t reg_dir, reg_sel;
+    int32_t reg_val = 0;
+
+    if (pin < 8)
+    {
+        reg_dir = SX1302_REG_GPIO_GPIO_DIR_L_DIRECTION;
+        reg_sel = SX1302_REG_GPIO_GPIO_SEL_0_SELECTION + pin;
+    }
+    else if (pin < 12)
+    {
+        reg_dir = SX1302_REG_GPIO_GPIO_DIR_H_DIRECTION;
+        reg_sel = (pin == 8) ? SX1302_REG_GPIO_GPIO_SEL_8_11_GPIO_8_SEL : SX1302_REG_GPIO_GPIO_SEL_8_11_GPIO_11_9_SEL;
+    }
+    else
+        return;
+
+    //set GPIO control mode to HOST
+    lgw_reg_w(reg_sel, 0);
+    //configure as an output
+    lgw_reg_r(reg_dir, &reg_val);
+    if(output)
+    {
+        //set output direction bit
+        reg_val |= (1 << (pin % 8));
+    }
+    else
+    {
+        //clear output direction bit
+        reg_val &= ~(1 << (pin % 8));
+    }
+
+    //write modified register value
+    lgw_reg_w(reg_dir, reg_val);
+}
+
+void lgw_pin_out_write(uint8_t pin, bool high)
+{
+    uint16_t reg_out;
+
+    // select register depending on pin number
+    if (pin < 8)
+    {
+        reg_out = SX1302_REG_GPIO_GPIO_OUT_L_OUT_VALUE;
+    }
+    else if (pin < 12)
+    {
+        reg_out = SX1302_REG_GPIO_GPIO_OUT_H_OUT_VALUE;
+    }
+    else
+        return;
+
+    int32_t reg_val = 0;
+    // get output value register
+    lgw_reg_r(reg_out, &reg_val);
+    if (high)
+    {
+        // set output value high bit
+        reg_val |= (1 << (pin % 8));
+    }
+    else
+    {
+        // clear output value high bit
+        reg_val &= ~(1 << (pin % 8));
+    }
+
+    // Write the register modified value
+    lgw_reg_w(reg_out, reg_val);
+}
 
 static void usage( void )
 {
@@ -1732,8 +1810,14 @@ int main(int argc, char ** argv)
     sigaction(SIGINT, &sigact, NULL); /* Ctrl-C */
     sigaction(SIGTERM, &sigact, NULL); /* default "kill" command */
 
+    /* Set GPIO's for LED's as Outputs */
+    lgw_pin_mode_set(GPIO_LED_GREEN, true);
+    lgw_pin_mode_set(GPIO_LED_BLUE, true);
+    lgw_pin_mode_set(GPIO_LED_RED, true);
+
     /* main loop task : statistics collection */
     while (!exit_sig && !quit_sig) {
+
         /* wait for next reporting interval */
         wait_ms(1000 * stat_interval);
 
@@ -2030,7 +2114,6 @@ void thread_up(void) {
     *(uint32_t *)(buff_up + 8) = net_mac_l;
 
     while (!exit_sig && !quit_sig) {
-
         /* fetch packets */
         pthread_mutex_lock(&mx_concent);
         nb_pkt = lgw_receive(NB_PKT_MAX, rxpkt);
@@ -2049,6 +2132,11 @@ void thread_up(void) {
             wait_ms(FETCH_SLEEP_MS);
             continue;
         }
+
+        /* Change blue on packet */
+    	lgw_pin_out_write(GPIO_LED_GREEN, false);
+    	lgw_pin_out_write(GPIO_LED_BLUE, true);
+    	lgw_pin_out_write(GPIO_LED_RED, false);
 
         /* get a copy of GPS time reference (avoid 1 mutex per packet) */
         if ((nb_pkt > 0) && (gps_enabled == true)) {
@@ -2729,6 +2817,11 @@ void thread_down(void) {
 
     while (!exit_sig && !quit_sig) {
 
+    	/* Pulse the Red LED for down */
+    	lgw_pin_out_write(GPIO_LED_GREEN, false);
+    	lgw_pin_out_write(GPIO_LED_BLUE, false);
+    	lgw_pin_out_write(GPIO_LED_RED, true);
+
         /* auto-quit if the threshold is crossed */
         if ((autoquit_threshold > 0) && (autoquit_cnt >= autoquit_threshold)) {
             exit_sig = true;
@@ -2889,6 +2982,10 @@ void thread_down(void) {
                         meas_dw_ack_rcv += 1;
                         pthread_mutex_unlock(&mx_meas_dw);
                         MSG("INFO: [down] PULL_ACK received in %i ms\n", (int)(1000 * difftimespec(recv_time, send_time)));
+                    	/* Set green LED for PULL_ACK received */
+                    	lgw_pin_out_write(GPIO_LED_GREEN, true);
+                    	lgw_pin_out_write(GPIO_LED_BLUE, false);
+                    	lgw_pin_out_write(GPIO_LED_RED, false);
                     }
                 } else { /* out-of-sync token */
                     MSG("INFO: [down] received out-of-sync ACK\n");

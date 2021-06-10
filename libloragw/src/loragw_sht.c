@@ -112,7 +112,7 @@ int sht_get_temperature(int i2c_fd, uint8_t i2c_addr, float * temperature, float
 
     (void)sht3c_wakeup(i2c_fd, i2c_addr);
 
-    usleep(250000); /* Just wait instead of using clock stretching */
+    wait_ms(25); /* Just wait instead of using clock stretching *//* Just wait instead of using clock stretching */
 
     /* Send measure command */
     err = i2c_linuxdev_write(i2c_fd, i2c_addr, READTEMP_REG, 0x66); /* ..., ..., Address, Command */
@@ -121,7 +121,7 @@ int sht_get_temperature(int i2c_fd, uint8_t i2c_addr, float * temperature, float
         return LGW_I2C_ERROR;
     }
 
-    usleep(250000); /* Just wait instead of using clock stretching */
+    wait_ms(25); /* Just wait instead of using clock stretching */
 
     /* Setup request structure */
     struct i2c_rdwr_ioctl_data packets;
