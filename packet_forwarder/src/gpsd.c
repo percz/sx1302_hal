@@ -61,15 +61,40 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 /* --- PRIVATE VARIABLES (GLOBAL) ------------------------------------------- */
 
 struct gps_data_t *gps_tcp_thread;
+pthread_t thrid_gpsd;
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DEFINITION ----------------------------------------- */
+
+void thread_gpsd(void) {
+	#define GPSD_DATA_TIMEOUT 50000 //Short timeout, can always catch on the next run
+	#define MODE_STR_NUM 4
+
+    while (gps_waiting(gps_tcp_thread, GPSD_DATA_TIMEOUT)) {
+
+    	if (-1 == gps_read(gps_tcp_thread, NULL, 0)) {
+    		printf("WARNING: [GPSd] could not get a valid message from GPS\n");
+    		break;
+        }
+
+        if (MODE_SET != (MODE_SET & gps_tcp_thread->set)) {
+            // did not even get mode, nothing to see here
+            continue;
+        }
+
+        /* Check returned mode is defined */
+        if (0 > gps_tcp_thread->fix.mode ||
+            MODE_STR_NUM <= gps_tcp_thread->fix.mode) {
+        	gps_tcp_thread->fix.mode = MODE_NOT_SEEN;
+        }
+
+    }
+}
 
 /* -------------------------------------------------------------------------- */
 /* --- PUBLIC FUNCTIONS DEFINITION ----------------------------------------- */
 
 int gpsd_enable(char *tcp_path, char *tcp_port, struct gps_data_t *gps_tcp_dev ) {
-
 	/* check input parameters */
     CHECK_NULL(tcp_path);
     CHECK_NULL(gps_tcp_dev);
@@ -86,13 +111,17 @@ int gpsd_enable(char *tcp_path, char *tcp_port, struct gps_data_t *gps_tcp_dev )
 
     gps_tcp_thread  = gps_tcp_dev;
 
+    printf("INFO: [main] Waiting for GPSd\n");
+    while (!isfinite(gps_tcp_thread->fix.latitude) || !isfinite( gps_tcp_thread->fix.longitude) || gps_tcp_thread->fix.mode != MODE_3D ) {
+    	thread_gpsd(); //Run once as blocking to try and populate location before first stats
+    }
+
     return LGW_GPS_SUCCESS;
 }
 
 int gpsd_disable(struct gps_data_t *gps_tcp_dev) {
 	// When you are done...
     if (0 != gps_stream(gps_tcp_dev, WATCH_DISABLE, NULL)) {
-    	printf("DEBUG: 125 \n");
         DEBUG_MSG("ERROR: TCP FAIL TO CLOSE\n");
         return LGW_GPS_ERROR;
     }
@@ -103,32 +132,17 @@ int gpsd_disable(struct gps_data_t *gps_tcp_dev) {
 }
 
 int gspd_update() {
-	#define GPSD_DATA_TIMEOUT 5000
-	#define MODE_STR_NUM 4
-
-	/* gps_tcp_thread set during gpsd_enable */
+	/* gps_tcp_thread set by gpsd_enable */
 	CHECK_NULL(gps_tcp_thread);
 
-    while (gps_waiting(gps_tcp_thread, GPSD_DATA_TIMEOUT)) {
-
-    	if (-1 == gps_read(gps_tcp_thread, NULL, 0)) {
-            return LGW_GPS_ERROR;
-        }
-
-        if (MODE_SET != (MODE_SET & gps_tcp_thread->set)) {
-            // did not even get mode, nothing to see here
-            continue;
-        }
-
-        /* Check returned mode is defined */
-        if (0 > gps_tcp_thread->fix.mode ||
-            MODE_STR_NUM <= gps_tcp_thread->fix.mode) {
-        	gps_tcp_thread->fix.mode = MODE_NOT_SEEN;
-        }
-
+	/* Unlike other threads, this runs to pull an update from GPSd then quits till called again. */
+    int i = pthread_create(&thrid_gpsd, NULL, (void * (*)(void *))thread_gpsd, NULL);
+    if (i != 0) {
+        printf("ERROR: [main] impossible to create GPS thread\n");
+        exit(EXIT_FAILURE);
     }
 
-    /* Check location is valid */
+    /* Check if we have a valid fix yet */
     if (!isfinite(gps_tcp_thread->fix.latitude) || !isfinite( gps_tcp_thread->fix.longitude) || gps_tcp_thread->fix.mode != MODE_3D ) {
     	return LGW_GPS_ERROR;
     }

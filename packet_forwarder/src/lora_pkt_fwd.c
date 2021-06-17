@@ -1675,7 +1675,7 @@ int main(int argc, char ** argv)
             gpsd_enabled = false;
             gps_ref_valid = false;
         } else {
-            printf("INFO: [main] %s connected for GPS synchronization\n", gpsd_tcp_path);
+        	printf("INFO: [main] %s valid for GPS synchronization\n", gpsd_tcp_path);
             gpsd_enabled = true;
             gps_ref_valid = false;
         }
@@ -1957,8 +1957,6 @@ int main(int argc, char ** argv)
         		cp_gps_coord.lat = gps_tcp_dev.fix.latitude; // latitude [-90,90] (North +, South -)
         		cp_gps_coord.lon = gps_tcp_dev.fix.longitude; // longitude [-180,180] (East +, West -)
         		cp_gps_coord.alt = gps_tcp_dev.fix.altHAE; //altitude in meters
-        	} else {
-        		printf("WARNING: [GPSd] could not get a valid message from GPS\n");
         	}
         }
 
