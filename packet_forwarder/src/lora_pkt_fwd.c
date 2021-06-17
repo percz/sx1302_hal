@@ -55,6 +55,16 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #include "loragw_reg.h"
 #include "loragw_gps.h"
 
+/*
+ * Here we bring in requirements for 'libgps-dev' to be installed on the built machine - I know this isn't ideal.
+ * The original dev's did a very good job of keeping the whole repo relatively free from dependents.
+ * Unfortunately the GPSD client libs themselves require 'scons' to build, which nothing loragw otherwise does,
+ * and the GPSD stuff spans too many files to simply put simply inside the libtools folder, which would be the ideal solution.
+ * It's much easier to just add the dependent.
+ */
+#include "gpsd_client.h"
+
+
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
 
@@ -179,6 +189,9 @@ static double xtal_correct = 1.0;
 static char gps_tty_path[64] = "\0"; /* path of the TTY port GPS is connected on */
 static int gps_tty_fd = -1; /* file descriptor of the GPS TTY port */
 static bool gps_enabled = false; /* is GPS enabled on that gateway ? */
+static char gpsd_tcp_path[64] = "\0"; /* URL or IP the GPSd server is connected on */
+static char gpsd_tcp_port[5] = "2947"; /* Port (as a string) the GPSd server is connected on */
+static bool gpsd_enabled = false; /* is GPS enabled on that gateway ? */
 
 /* GPS time reference */
 static pthread_mutex_t mx_timeref = PTHREAD_MUTEX_INITIALIZER; /* control access to GPS time reference */
@@ -221,6 +234,7 @@ static uint32_t meas_nb_beacon_sent = 0; /* count beacon actually sent to concen
 static uint32_t meas_nb_beacon_rejected = 0; /* count beacon rejected for queuing */
 
 static pthread_mutex_t mx_meas_gps = PTHREAD_MUTEX_INITIALIZER; /* control access to the GPS statistics */
+struct gps_data_t gps_tcp_dev; /* GPSd data stream */
 static bool gps_coord_valid; /* could we get valid GPS coordinates ? */
 static struct coord_s meas_gps_coord; /* GPS position of the gateway */
 static struct coord_s meas_gps_err; /* GPS position of the gateway */
@@ -452,7 +466,7 @@ static int parse_SX130x_configuration(const char * conf_file) {
     	boardconf.temp_type = LGW_TEMP_UNKNOWN;
     } else if (!strncmp(str, "FAKE", 3) || !strncmp(str, "fake", 3)) {
         boardconf.temp_type = LGW_TEMP_FAKE;
-    } else if (!strncmp(str, "sht", 3) || !strncmp(str, "SHT", 3)) {
+    } else if (!strncmp(str, "SHT", 3) || !strncmp(str, "sht", 3)) {
         boardconf.temp_type = LGW_TEMP_SHT;
     } else {
         MSG("ERROR: invalid temperature module type: %s (should be undefined, FAKE or SHT)\n", str);
@@ -1198,6 +1212,21 @@ static int parse_gateway_configuration(const char * conf_file) {
         gps_tty_path[sizeof gps_tty_path - 1] = '\0'; /* ensure string termination */
         MSG("INFO: GPS serial port path is configured to \"%s\"\n", gps_tty_path);
     }
+    /* GPSd */
+    str = json_object_get_string(conf_obj, "gpsd_tcp_path");
+    if (str != NULL) {
+        strncpy(gpsd_tcp_path, str, sizeof gpsd_tcp_path);
+        gpsd_tcp_path[sizeof gpsd_tcp_path - 1] = '\0';
+        MSG("INFO: GPSd path is configured to \"%s\"\n", gpsd_tcp_path);
+
+        str = json_object_get_string(conf_obj, "gpsd_tcp_port");
+        if (str != NULL) {
+            strncpy(gpsd_tcp_port, str, sizeof gpsd_tcp_port);
+            gpsd_tcp_port[sizeof gpsd_tcp_port - 1] = '\0';
+        }
+        //If gpsd_tcp_port not in conf_obj, there is a default value anyway
+        MSG("INFO: GPSd port is configured to \"%s\"\n", gpsd_tcp_port);
+    }
 
     /* get reference coordinates */
     val = json_object_get_value(conf_obj, "ref_latitude");
@@ -1638,8 +1667,21 @@ int main(int argc, char ** argv)
         exit(EXIT_FAILURE);
     }
 
-    /* Start GPS a.s.a.p., to allow it to lock */
-    if (gps_tty_path[0] != '\0') { /* do not try to open GPS device if no path set */
+	/* do not try to open GPSd device if no path set */
+    if ( gpsd_tcp_path[0] != '\0' ) {
+        i = gpsd_enable(gpsd_tcp_path, gpsd_tcp_port , &gps_tcp_dev);
+        if (i != LGW_GPS_SUCCESS) {
+            printf("WARNING: [main] impossible to connect %s:%s for GPS sync (check permissions)\n", gps_tty_path, gpsd_tcp_port);
+            gpsd_enabled = false;
+            gps_ref_valid = false;
+        } else {
+            printf("INFO: [main] %s connected for GPS synchronization\n", gpsd_tcp_path);
+            gpsd_enabled = true;
+            gps_ref_valid = false;
+        }
+    }
+    /* Start serial GPS a.s.a.p., to allow it to lock */
+    if ( (gps_enabled == false) && (gps_tty_path[0] != '\0') ) { /* Only if GPSd fails, then try a direct serial connection */
         i = lgw_gps_enable(gps_tty_path, "ubx7", 0, &gps_tty_fd); /* HAL only supports u-blox 7 for now */
         if (i != LGW_GPS_SUCCESS) {
             printf("WARNING: [main] impossible to open %s for GPS sync (check permissions)\n", gps_tty_path);
@@ -1788,7 +1830,7 @@ int main(int argc, char ** argv)
         }
     }
 
-    /* spawn thread to manage GPS */
+    /* spawn thread to manage GPS over serial */
     if (gps_enabled == true) {
         i = pthread_create(&thrid_gps, NULL, (void * (*)(void *))thread_gps, NULL);
         if (i != 0) {
@@ -1907,13 +1949,26 @@ int main(int argc, char ** argv)
             cp_gps_coord = meas_gps_coord;
             pthread_mutex_unlock(&mx_meas_gps);
         }
+        if (gpsd_enabled == true) {
+        	//TODO: Grab GPSd data
+        	i = gspd_update();
+        	if (i == LGW_GPS_SUCCESS) {
+        		coord_ok = true;
+        		cp_gps_coord.lat = gps_tcp_dev.fix.latitude; // latitude [-90,90] (North +, South -)
+        		cp_gps_coord.lon = gps_tcp_dev.fix.longitude; // longitude [-180,180] (East +, West -)
+        		cp_gps_coord.alt = gps_tcp_dev.fix.altHAE; //altitude in meters
+        	} else {
+        		printf("WARNING: [GPSd] could not get a valid message from GPS\n");
+        	}
+        }
 
         /* overwrite with reference coordinates if function is enabled */
         if (gps_fake_enable == true) {
             cp_gps_coord = reference_coord;
         }
 
-        /* display a report */
+        /* display a report...
+           no need for mutex, display is not critical */
         printf("\n##### %s #####\n", stat_timestamp);
         printf("### [UPSTREAM] ###\n");
         printf("# RF packets received by concentrator: %u\n", cp_nb_rx_rcv);
@@ -1952,8 +2007,7 @@ int main(int argc, char ** argv)
         printf("#--------\n");
         jit_print_queue (&jit_queue[1], false, DEBUG_LOG);
         printf("### [GPS] ###\n");
-        if (gps_enabled == true) {
-            /* no need for mutex, display is not critical */
+        if (gps_enabled == true || gpsd_enabled == true) {
             if (gps_ref_valid == true) {
                 printf("# Valid time reference (age: %li sec)\n", (long)difftime(time(NULL), time_reference_gps.systime));
             } else {
@@ -1969,9 +2023,7 @@ int main(int argc, char ** argv)
         } else {
             printf("# GPS sync is disabled\n");
         }
-        pthread_mutex_lock(&mx_concent);
         i = lgw_get_temperature(&temperature, &humidity);
-        pthread_mutex_unlock(&mx_concent);
         if (i != LGW_HAL_SUCCESS) {
             printf("### Concentrator temperature unknown ###\n");
         } else {
@@ -1982,7 +2034,8 @@ int main(int argc, char ** argv)
 
         /* generate a JSON report (will be sent to server by upstream thread) */
         pthread_mutex_lock(&mx_stat_rep);
-        if (((gps_enabled == true) && (coord_ok == true)) || (gps_fake_enable == true)) {
+        if (( ((gps_enabled == true) || (gpsd_enabled == true)) && (coord_ok == true))
+        		|| (gps_fake_enable == true)) {
         	if (humidity >= 0) {
         		snprintf(status_report, STATUS_SIZE, "\"stat\":{\"time\":\"%s\",\"lati\":%.5f,\"long\":%.5f,\"alti\":%i,\"rxnb\":%u,\"rxok\":%u,\"rxfw\":%u,\"ackr\":%.1f,\"dwnb\":%u,\"txnb\":%u,\"temp\":%.1f,\"humi\":%.1f}", stat_timestamp, cp_gps_coord.lat, cp_gps_coord.lon, cp_gps_coord.alt, cp_nb_rx_rcv, cp_nb_rx_ok, cp_up_pkt_fwd, 100.0 * up_ack_ratio, cp_dw_dgram_rcv, cp_nb_tx_ok, temperature, humidity);
         	} else {
@@ -2018,11 +2071,23 @@ int main(int argc, char ** argv)
             printf("ERROR: failed to join Spectral Scan thread with %d - %s\n", i, strerror(errno));
         }
     }
+
     if (gps_enabled == true) {
         pthread_cancel(thrid_gps); /* don't wait for GPS thread, no access to concentrator board */
         pthread_cancel(thrid_valid); /* don't wait for validation thread, no access to concentrator board */
 
         i = lgw_gps_disable(gps_tty_fd);
+        if (i == LGW_HAL_SUCCESS) {
+            MSG("INFO: GPS closed successfully\n");
+        } else {
+            MSG("WARNING: failed to close GPS successfully\n");
+        }
+    }
+
+    if (gpsd_enabled == true) {
+     //   pthread_cancel(thrid_gps); /* don't wait for GPS thread, no access to concentrator board */
+     //   pthread_cancel(thrid_valid); /* don't wait for validation thread, no access to concentrator board */
+        i = gpsd_disable(&gps_tcp_dev);
         if (i == LGW_HAL_SUCCESS) {
             MSG("INFO: GPS closed successfully\n");
         } else {
@@ -3461,9 +3526,10 @@ static void gps_process_sync(void) {
     struct timespec gps_time;
     struct timespec utc;
     uint32_t trig_tstamp; /* concentrator timestamp associated with PPM pulse */
-    int i = lgw_gps_get(&utc, &gps_time, NULL, NULL);
+    int i;
 
     /* get GPS time for synchronization */
+    i = lgw_gps_get(&utc, &gps_time, NULL, NULL);
     if (i != LGW_GPS_SUCCESS) {
         MSG("WARNING: [gps] could not get GPS time from GPS\n");
         return;
@@ -3635,7 +3701,9 @@ void thread_valid(void) {
 
         /* calculate when the time reference was last updated */
         pthread_mutex_lock(&mx_timeref);
+
         gps_ref_age = (long)difftime(time(NULL), time_reference_gps.systime);
+
         if ((gps_ref_age >= 0) && (gps_ref_age <= GPS_REF_MAX_AGE)) {
             /* time ref is ok, validate and  */
             gps_ref_valid = true;
