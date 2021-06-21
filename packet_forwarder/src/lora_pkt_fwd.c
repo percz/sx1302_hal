@@ -1957,6 +1957,16 @@ int main(int argc, char ** argv)
         		cp_gps_coord.lat = gps_tcp_dev.fix.latitude; // latitude [-90,90] (North +, South -)
         		cp_gps_coord.lon = gps_tcp_dev.fix.longitude; // longitude [-180,180] (East +, West -)
         		cp_gps_coord.alt = gps_tcp_dev.fix.altHAE; //altitude in meters
+        	    i = lgw_get_trigcnt(&trig_tstamp);
+        		i |= lgw_gps_sync(&time_reference_gps, trig_tstamp, gps_tcp_dev.fix.time, gps_tcp_dev.fix.time);
+        		if (i == LGW_GPS_SUCCESS) {
+        			gps_ref_valid = true;
+        			xtal_correct_ok = true;
+        		} else {
+        			xtal_correct_ok = false;
+        		}
+        	} else {
+        		coord_ok = false;
         	}
         }
 
@@ -2083,8 +2093,6 @@ int main(int argc, char ** argv)
     }
 
     if (gpsd_enabled == true) {
-     //   pthread_cancel(thrid_gps); /* don't wait for GPS thread, no access to concentrator board */
-     //   pthread_cancel(thrid_valid); /* don't wait for validation thread, no access to concentrator board */
         i = gpsd_disable(&gps_tcp_dev);
         if (i == LGW_HAL_SUCCESS) {
             MSG("INFO: GPS closed successfully\n");
@@ -3481,6 +3489,12 @@ void thread_jit(void) {
                         }
 
                         /* send packet to concentrator */
+
+                        /* Change red on send */
+                    	lgw_pin_out_write(GPIO_LED_GREEN, false);
+                    	lgw_pin_out_write(GPIO_LED_BLUE, false);
+                    	lgw_pin_out_write(GPIO_LED_RED, true);
+
                         pthread_mutex_lock(&mx_concent); /* may have to wait for a fetch to finish */
                         if (spectral_scan_params.enable == true) {
                             result = lgw_spectral_scan_abort();

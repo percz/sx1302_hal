@@ -21,6 +21,7 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #include <stdio.h>      /* printf fprintf */
 
 #include "loragw_i2c.h"
+#include "loragw_aux.h"
 #include "loragw_sht.h"
 
 #include <sys/ioctl.h>

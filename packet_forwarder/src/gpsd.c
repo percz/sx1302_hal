@@ -25,14 +25,15 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #include <signal.h>         /* sigaction */
 #include <time.h>           /* time, clock_gettime, strftime, gmtime */
 #include <sys/time.h>       /* timeval */
-#include <unistd.h>         /* getopt, access */
+#include <unistd.h>         /* for sleep() */
 #include <stdlib.h>         /* atoi, exit */
 #include <errno.h>          /* error messages */
-#include <math.h>           /* modf */
+#include <math.h>           /* for isfinite() */
 
 #include <pthread.h>
 
 #include "../libloragw/inc/loragw_gps.h"
+#include "../libloragw/inc/loragw_aux.h"
 #include "gpsd_client.h"
 
 /* -------------------------------------------------------------------------- */
@@ -67,28 +68,31 @@ pthread_t thrid_gpsd;
 /* --- PRIVATE FUNCTIONS DEFINITION ----------------------------------------- */
 
 void thread_gpsd(void) {
-	#define GPSD_DATA_TIMEOUT 50000 //Short timeout, can always catch on the next run
+	#define GPSD_DATA_TIMEOUT 1500000 //Try and keep between (what should be) one and two updates from GPSd daemon
 	#define MODE_STR_NUM 4
 
-    while (gps_waiting(gps_tcp_thread, GPSD_DATA_TIMEOUT)) {
+	while (1) {
+		while (gps_waiting(gps_tcp_thread, GPSD_DATA_TIMEOUT)) {
 
-    	if (-1 == gps_read(gps_tcp_thread, NULL, 0)) {
-    		printf("WARNING: [GPSd] could not get a valid message from GPS\n");
-    		break;
-        }
+			if (-1 == gps_read(gps_tcp_thread, NULL, 0)) {
+				printf("WARNING: [GPSd] could not get a valid message from GPS\n");
+				break;
+			}
 
-        if (MODE_SET != (MODE_SET & gps_tcp_thread->set)) {
-            // did not even get mode, nothing to see here
-            continue;
-        }
+			if (MODE_SET != (MODE_SET & gps_tcp_thread->set)) {
+				// did not even get mode, nothing to see here
+				continue;
+			}
 
-        /* Check returned mode is defined */
-        if (0 > gps_tcp_thread->fix.mode ||
-            MODE_STR_NUM <= gps_tcp_thread->fix.mode) {
-        	gps_tcp_thread->fix.mode = MODE_NOT_SEEN;
-        }
-
-    }
+			/* Check returned mode is defined */
+			if (0 > gps_tcp_thread->fix.mode ||
+				MODE_STR_NUM <= gps_tcp_thread->fix.mode) {
+				gps_tcp_thread->fix.mode = MODE_NOT_SEEN;
+			}
+		}
+		printf("WARNING: [GPSd] Timeout getting a valid message from GPS\n");
+		wait_ms(100);
+	}
 }
 
 /* -------------------------------------------------------------------------- */
@@ -112,14 +116,23 @@ int gpsd_enable(char *tcp_path, char *tcp_port, struct gps_data_t *gps_tcp_dev )
     gps_tcp_thread  = gps_tcp_dev;
 
     printf("INFO: [main] Waiting for GPSd\n");
-    while (!isfinite(gps_tcp_thread->fix.latitude) || !isfinite( gps_tcp_thread->fix.longitude) || gps_tcp_thread->fix.mode != MODE_3D ) {
-    	thread_gpsd(); //Run once as blocking to try and populate location before first stats
+
+	/* gps_tcp_thread set by gpsd_enable */
+	CHECK_NULL(gps_tcp_thread);
+
+    int i = pthread_create(&thrid_gpsd, NULL, (void * (*)(void *))thread_gpsd, NULL);
+    if (i != 0) {
+        printf("ERROR: [main] impossible to create GPS thread\n");
+        exit(EXIT_FAILURE);
     }
 
     return LGW_GPS_SUCCESS;
 }
 
 int gpsd_disable(struct gps_data_t *gps_tcp_dev) {
+
+	pthread_cancel(thrid_gpsd); //TODO: Check if thread is running before trying to cancel it
+
 	// When you are done...
     if (0 != gps_stream(gps_tcp_dev, WATCH_DISABLE, NULL)) {
         DEBUG_MSG("ERROR: TCP FAIL TO CLOSE\n");
@@ -132,15 +145,6 @@ int gpsd_disable(struct gps_data_t *gps_tcp_dev) {
 }
 
 int gspd_update() {
-	/* gps_tcp_thread set by gpsd_enable */
-	CHECK_NULL(gps_tcp_thread);
-
-	/* Unlike other threads, this runs to pull an update from GPSd then quits till called again. */
-    int i = pthread_create(&thrid_gpsd, NULL, (void * (*)(void *))thread_gpsd, NULL);
-    if (i != 0) {
-        printf("ERROR: [main] impossible to create GPS thread\n");
-        exit(EXIT_FAILURE);
-    }
 
     /* Check if we have a valid fix yet */
     if (!isfinite(gps_tcp_thread->fix.latitude) || !isfinite( gps_tcp_thread->fix.longitude) || gps_tcp_thread->fix.mode != MODE_3D ) {
