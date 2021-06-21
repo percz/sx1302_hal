@@ -1649,7 +1649,6 @@ int lgw_get_temperature(float* temperature, float * humidity) {
 			err = LGW_HAL_SUCCESS;
 			break;
 		case LGW_TEMP_SHT:
-			printf("WARNING: SHTxx usage readings under development. \n");
 			err = sht_get_temperature(ts_fd, ts_addr, temperature, humidity);
 			break;
 		default:

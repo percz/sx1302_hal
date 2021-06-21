@@ -3602,7 +3602,7 @@ void thread_gps(void) {
         /* blocking non-canonical read on serial port */
         ssize_t nb_char = read(gps_tty_fd, serial_buff + wr_idx, LGW_GPS_MIN_MSG_SIZE);
         if (nb_char <= 0) {
-            MSG("WARNING: [gps] read() returned value %zd\n", nb_char);
+            //MSG("WARNING: [gps] read() returned value %zd\n", nb_char); /* This floods the console on failures. */
             continue;
         }
         wr_idx += (size_t)nb_char;
@@ -3628,7 +3628,10 @@ void thread_gps(void) {
                         frame_size = 0;
                     } else if (latest_msg == INVALID) {
                         /* message header received but message appears to be corrupted */
-                        MSG("WARNING: [gps] could not get a valid message from GPS (no time)\n");
+                        if (xtal_correct_ok == true) {
+                        	MSG("WARNING: [gps] could not get a valid message from GPS (no time)\n");
+                        	xtal_correct_ok = false;
+                        }
                         frame_size = 0;
                     } else if (latest_msg == UBX_NAV_TIMEGPS) {
                         gps_process_sync();
