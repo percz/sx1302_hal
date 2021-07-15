@@ -113,13 +113,16 @@ int sht_get_temperature(int i2c_fd, uint8_t i2c_addr, float * temperature, float
 
     (void)sht3c_wakeup(i2c_fd, i2c_addr);
 
-    wait_ms(25); /* Just wait instead of using clock stretching *//* Just wait instead of using clock stretching */
+    wait_ms(25); /* Just wait instead of using clock stretching */
 
     /* Send measure command */
     err = i2c_linuxdev_write(i2c_fd, i2c_addr, READTEMP_REG, 0x66); /* ..., ..., Address, Command */
     if (err < 0) {
         printf("ERROR: failed to request temperature from I2C device 0x%02X (err=%i) \n", i2c_addr, err);
-        return LGW_I2C_ERROR;
+        if ( *temperature < 0.0f || *humidity < 0.0f ) { //We never had a good reading
+        	return LGW_I2C_ERROR; //This will feed back and result in program exit
+        }
+        return LGW_I2C_SUCCESS;
     }
 
     wait_ms(25); /* Just wait instead of using clock stretching */

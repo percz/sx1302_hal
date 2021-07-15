@@ -1147,6 +1147,7 @@ static int parse_gateway_configuration(const char * conf_file) {
         MSG("INFO: gateway MAC address is configured to %016llX\n", ull);
     }
 
+
     /* server hostname or IP address (optional) */
     str = json_object_get_string(conf_obj, "server_address");
     if (str != NULL) {
@@ -1159,12 +1160,12 @@ static int parse_gateway_configuration(const char * conf_file) {
     val = json_object_get_value(conf_obj, "serv_port_up");
     if (val != NULL) {
         snprintf(serv_port_up, sizeof serv_port_up, "%u", (uint16_t)json_value_get_number(val));
-        MSG("INFO: upstream port is configured to \"%s\"\n", serv_port_up);
+        MSG("INFO: %s upstream port is configured to \"%s\"\n", serv_addr, serv_port_up);
     }
     val = json_object_get_value(conf_obj, "serv_port_down");
     if (val != NULL) {
         snprintf(serv_port_down, sizeof serv_port_down, "%u", (uint16_t)json_value_get_number(val));
-        MSG("INFO: downstream port is configured to \"%s\"\n", serv_port_down);
+        MSG("INFO: %s downstream port is configured to \"%s\"\n", serv_addr, serv_port_down);
     }
 
     /* get keep-alive interval (in seconds) for downstream (optional) */
@@ -1956,8 +1957,9 @@ int main(int argc, char ** argv)
         		coord_ok = true;
         		cp_gps_coord.lat = gps_tcp_dev.fix.latitude; // latitude [-90,90] (North +, South -)
         		cp_gps_coord.lon = gps_tcp_dev.fix.longitude; // longitude [-180,180] (East +, West -)
-        		cp_gps_coord.alt = gps_tcp_dev.fix.altHAE; //altitude in meters
+        		cp_gps_coord.alt = gps_tcp_dev.fix.altMSL; //altitude in meters
         	    i = lgw_get_trigcnt(&trig_tstamp);
+        	    /* TODO: Assume we should be using system UTC and not twice the GPS. e.g. look at what Thread 4 would be doing...  */
         		i |= lgw_gps_sync(&time_reference_gps, trig_tstamp, gps_tcp_dev.fix.time, gps_tcp_dev.fix.time);
         		if (i == LGW_GPS_SUCCESS) {
         			gps_ref_valid = true;
@@ -2017,6 +2019,7 @@ int main(int argc, char ** argv)
         printf("### [GPS] ###\n");
         if (gps_enabled == true || gpsd_enabled == true) {
             if (gps_ref_valid == true) {
+				printf("# GPS time (%li sec)\n", gps_tcp_dev.fix.time.tv_sec);
                 printf("# Valid time reference (age: %li sec)\n", (long)difftime(time(NULL), time_reference_gps.systime));
             } else {
                 printf("# Invalid time reference (age: %li sec)\n", (long)difftime(time(NULL), time_reference_gps.systime));
