@@ -27,7 +27,8 @@ RELEASE_VERSION := `cat ../VERSION`
 CC := $(CROSS_COMPILE)gcc
 AR := $(CROSS_COMPILE)ar
 
-CFLAGS := -O2 -Wall -Wextra -std=c99 -Iinc -I. -I../libtools/inc
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+CFLAGS := -O3 -Wall -Wextra -std=c99 -Iinc -I. -I$(MAKEFILE_DIR)../libtools/inc -I$(MAKEFILE_DIR)../packet_forwarder/inc -I$(MAKEFILE_DIR)../libloragw/inc
 VFLAG := -D VERSION_STRING="\"$(RELEASE_VERSION)\""
 
 ### Constants for Lora concentrator HAL library

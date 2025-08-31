@@ -1,3 +1,4 @@
+# Hide all the build output files
 */*.a
 */obj/
 *.swp
@@ -11,4 +12,11 @@ util_boot/boot
 util_spectral_scan/spectral_scan
 */.project
 
+# If you have a bunch of build and test commands to run over SSH, you can put them in remotebuild.sh...
 remotebuild.sh
+
+# VSCode junk
+.cache/
+.vscode/
+.clangd
+compile_commands.json

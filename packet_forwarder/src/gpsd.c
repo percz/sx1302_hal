@@ -32,8 +32,8 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 
 #include <pthread.h>
 
-#include "../libloragw/inc/loragw_gps.h"
-#include "../libloragw/inc/loragw_aux.h"
+#include "loragw_gps.h"
+#include "loragw_aux.h"
 #include "gpsd_client.h"
 
 /* -------------------------------------------------------------------------- */
