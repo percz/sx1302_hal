@@ -14,6 +14,7 @@ util_spectral_scan/spectral_scan
 
 # If you have a bunch of build and test commands to run over SSH, you can put them in remotebuild.sh...
 remotebuild.sh
+remote_build.log
 
 # VSCode junk
 .cache/

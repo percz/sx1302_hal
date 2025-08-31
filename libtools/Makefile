@@ -7,7 +7,7 @@ CROSS_COMPILE ?=
 CC := $(CROSS_COMPILE)gcc
 AR := $(CROSS_COMPILE)ar
 
-CFLAGS := -O2 -Wall -Wextra -std=c99 -Iinc -I.
+CFLAGS := -O3 -march=native -funroll-loops -fomit-frame-pointer -flto -falign-functions=32 -falign-jumps=16 -falign-loops=16 -fdata-sections -ffunction-sections -std=c20 -Iinc -I.
 
 OBJDIR = obj
 INCLUDES = $(wildcard inc/*.h)

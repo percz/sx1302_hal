@@ -3,7 +3,7 @@
 ARCH ?=
 CROSS_COMPILE ?=
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-GLOBAL_CFLAGS := -O3 -Wall -Wextra \
+GLOBAL_CFLAGS := -O3 -Wall -Wextra -march=native -funroll-loops -fomit-frame-pointer -flto -falign-functions=32 -falign-jumps=16 -falign-loops=16 -fdata-sections -ffunction-sections \
 	-I$(MAKEFILE_DIR)inc \
 	-I$(MAKEFILE_DIR) \
 	-I$(MAKEFILE_DIR)libtools/inc \
